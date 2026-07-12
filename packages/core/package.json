@@ -13,9 +13,12 @@
   },
   "scripts": {
     "build": "tsc -b tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bench": "tsx bench/tokenize.bench.ts"
   },
   "devDependencies": {
+    "fast-check": "^3",
+    "tsx": "^4",
     "typescript": "^5",
     "vitest": "^3"
   }
