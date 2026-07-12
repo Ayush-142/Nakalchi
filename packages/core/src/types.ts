@@ -23,3 +23,19 @@ export interface Token {
   /** UTF-8 byte offset, exclusive. */
   endByte: number;
 }
+
+/** A pair of independent polynomial-hash values ("double hashing" - see config.ts). */
+export interface Hash64 {
+  h1: number;
+  h2: number;
+}
+
+export interface Fingerprint {
+  hash: Hash64;
+  /**
+   * 0-based index into the Token[] stream the k-gram starts at. For byte
+   * offsets, look up tokens[position].startByte / tokens[position + k -
+   * 1].endByte - not duplicated here.
+   */
+  position: number;
+}

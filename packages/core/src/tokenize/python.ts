@@ -9,15 +9,9 @@ import {
   makeOperatorMatcher,
   sortByLengthDescending,
 } from './scanner.js';
-import { PYTHON_KEYWORDS, NORM_NUM, NORM_RAW, NORM_STR, classifyIdentifier } from './normalize.js';
+import { PYTHON_KEYWORDS, PYTHON_OPERATORS, NORM_NUM, NORM_RAW, NORM_STR, classifyIdentifier } from './normalize.js';
 
-const PYTHON_OPERATORS_SORTED = sortByLengthDescending([
-  '**=', '//=', '<<=', '>>=', '...',
-  '**', '//', '<<', '>>', '<=', '>=', '==', '!=', '->', ':=',
-  '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '@=',
-  '+', '-', '*', '/', '%', '=', '<', '>', '!', '&', '|', '^', '~', '@',
-  '(', ')', '[', ']', '{', '}', ':', ',', '.', ';',
-]);
+const PYTHON_OPERATORS_SORTED = sortByLengthDescending(PYTHON_OPERATORS);
 const matchPythonOperator = makeOperatorMatcher(PYTHON_OPERATORS_SORTED);
 
 interface Pos {
