@@ -39,3 +39,56 @@ export interface Fingerprint {
    */
   position: number;
 }
+
+/** Input to analyzeCorpus() - core has zero I/O, so the caller assigns ids. */
+export interface SubmissionInput {
+  id: string;
+  language: Language;
+  source: string;
+}
+
+/** One occurrence of a fingerprint hash within one submission. */
+export interface Posting {
+  submissionId: string;
+  position: number;
+}
+
+export interface MatchRegion {
+  /** Byte offsets, side A. */
+  aStart: number;
+  aEnd: number;
+  /** Byte offsets, side B. */
+  bStart: number;
+  bEnd: number;
+  aLineStart: number;
+  aLineEnd: number;
+  bLineStart: number;
+  bLineEnd: number;
+  /** Token span (A-side count - see regions.ts). */
+  tokens: number;
+}
+
+export interface PairScore {
+  a: string;
+  b: string;
+  /** |FP(A) ∩ FP(B)| / |FP(A)| - asymmetric containment, ARCHITECTURE.md §2. */
+  simAtoB: number;
+  /** |FP(A) ∩ FP(B)| / |FP(B)|. */
+  simBtoA: number;
+  /** |FP(A) ∩ FP(B)|, distinct hash values. */
+  sharedFingerprints: number;
+  longestRegionTokens: number;
+  /** max(simAtoB, simBtoA) >= flagThreshold, per ARCHITECTURE.md §4.1. */
+  flagged: boolean;
+  /** Capped at 200 per ARCHITECTURE.md §4.1. */
+  regions: MatchRegion[];
+}
+
+export interface AnalysisResult {
+  pairs: PairScore[];
+  stats: {
+    submissions: number;
+    candidatePairs: number;
+    fullPairCount: number;
+  };
+}

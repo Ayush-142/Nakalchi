@@ -49,3 +49,32 @@ export const HASH1_BASE = 131_071; // 2^17 - 1
 export const HASH1_MOD = 1_000_000_007;
 export const HASH2_BASE = 524_287; // 2^19 - 1
 export const HASH2_MOD = 998_244_353;
+
+// Phase 3 (matching engine) parameters - defaults per ARCHITECTURE.md §2's
+// params table.
+export const DEFAULT_BASECODE_MAX_FREQ = 0.5; // hash in >50% of submissions -> template
+export const DEFAULT_MIN_SHARED_FINGERPRINTS = 5; // below this, a pair is never a candidate
+export const DEFAULT_FLAG_THRESHOLD = 0.35; // max(simAtoB, simBtoA) >= this -> flagged
+
+/**
+ * Nakalchi-introduced parameter - NOT specified anywhere in
+ * ARCHITECTURE.md (only named in prose, in §5 Phase 3 item 3: "posting
+ * list length in [2, corpusCap]", with no default value given there).
+ *
+ * An absolute (not fractional) bound on how many distinct submissions may
+ * share a single fingerprint before candidate generation, independent of
+ * corpus size - basecodeMaxFreq alone doesn't bound this for large
+ * corpora: at N=10,000, basecodeMaxFreq=0.5 alone still allows 5,000
+ * distinct submissions to share one hash, contributing up to
+ * ~1.25e7 pair-tallies from that single hash (m*(m-1)/2 with m=5,000).
+ * corpusCap bounds that worst case regardless of N.
+ *
+ * Enforced via the exact same exclusion-set mechanism as base-code
+ * filtering (match/basecode.ts) - a hash exceeding corpusCap is removed
+ * from every submission's fingerprint set before indexing, not skipped
+ * only at candidate-generation time. This keeps sharedFingerprints (the
+ * numerator of simAtoB/simBtoA) and each submission's |FP| (the
+ * denominator) always computed over the same filtered sets - skipping the
+ * bucket only during candidate tallying would desync the two.
+ */
+export const DEFAULT_CORPUS_CAP = 100;
