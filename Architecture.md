@@ -145,7 +145,7 @@ Why asymmetric similarity: if A is 30 lines and B is 300 lines containing all of
 
 **Queue-based ingestion, synchronous reads.** Analyses are long-running (seconds to minutes) → async via BullMQ with progress reporting. Reading results is fast → plain REST. Same split CodeArena already uses for judging, so the operational story is consistent.
 
-**Shared Redis, separate Mongo database.** Reuse the VM's Redis (namespaced queue prefix `sentinel:`) to stay within Azure-for-Students resources; use a separate Mongo database `Nakalchi` for clean data ownership. Document this as a cost-driven tradeoff you'd revisit with real budget.
+**Shared Redis, separate Mongo database.** Reuse the VM's Redis (namespaced queue prefix `Nakalchi:`) to stay within Azure-for-Students resources; use a separate Mongo database `Nakalchi` for clean data ownership. Document this as a cost-driven tradeoff you'd revisit with real budget.
 
 **Idempotency everywhere.** Analysis jobs carry an `analysisId`; re-delivery of the same job (BullMQ retry, worker crash) must not duplicate results. Worker checks analysis status before starting and writes results in a single transactional finalize step (delete-then-insert pairs under the analysisId, then flip status). Webhooks to CodeArena carry the same id and CodeArena treats them idempotently.
 
@@ -234,7 +234,7 @@ Nakalchi/
 │   │   │   │   ├── SubmissionSnapshot.ts
 │   │   │   │   └── Pair.ts
 │   │   │   ├── queue/
-│   │   │   │   ├── queues.ts        # BullMQ queue defs, prefix "sentinel:"
+│   │   │   │   ├── queues.ts        # BullMQ queue defs, prefix "Nakalchi:"
 │   │   │   │   └── analysisWorker.ts# consumes jobs, drives core pipeline, progress,
 │   │   │   │                        #   idempotent finalize, webhook emit w/ HMAC sig
 │   │   │   ├── integrations/
@@ -386,7 +386,7 @@ Every phase ends with a review gate: plan reviewed before code, acceptance crite
 3. `POST /analyses` (direct mode first): validate payload (per-submission size cap 256KB, corpus cap 5,000 — return 413/422 with error envelope), snapshot submissions, create analysis `queued`, enqueue BullMQ job `{analysisId}` with `jobId = analysisId` (BullMQ-level dedup).
 4. Worker: concurrency 1 (CPU-bound); status transitions with guards (a `completed` analysis is never re-run — idempotent re-delivery check); progress updates every N submissions fingerprint-ed and per pipeline stage; finalize = bulk-delete pairs for analysisId, bulk-insert, flip status — restart-safe.
 5. Read endpoints with cursor pagination, `minSim` / `flaggedOnly` filters, and `GET /pairs/:id` assembling both sources + regions.
-6. Webhook notifier: signed (`X-Sentinel-Signature: hmac-sha256(body, WEBHOOK_SECRET)`), 3 retries with exponential backoff, outcomes logged on the analysis doc.
+6. Webhook notifier: signed (`X-Nakalchi-Signature: hmac-sha256(body, WEBHOOK_SECRET)`), 3 retries with exponential backoff, outcomes logged on the analysis doc.
 7. API-key auth middleware (constant-time compare), pino structured logging with `analysisId` correlation on every log line, `/healthz` + `/readyz`.
 8. Graceful shutdown: SIGTERM → stop HTTP intake → wait for in-flight job (or requeue) → close connections. Test it: kill the worker mid-analysis, restart, assert the analysis completes correctly exactly once.
 9. Integration tests (supertest + mongodb-memory-server + Redis): full happy path (POST → poll → pairs match Phase 3 expectations on the fixture corpus), auth failures, validation failures, idempotent re-enqueue.
@@ -410,19 +410,19 @@ Every phase ends with a review gate: plan reviewed before code, acceptance crite
 ### Phase 6 — CodeArena Integration (Week 6, second half)
 
 **Do:**
-1. CodeArena side: on contest finalization, enqueue `integrity:analyze` (feature-flagged) → a thin adapter calls Sentinel `POST /analyses` in pull mode; add an internal CodeArena endpoint `GET /internal/contests/:id/submissions` (service-token protected) that Sentinel's `integrations/codearena.ts` consumes with pagination.
-2. Webhook receiver in CodeArena: verify HMAC, store `{analysisId, flaggedPairs}` on the contest, render an "Integrity" tab in the contest admin UI that deep-links into Sentinel's report pages.
-3. Failure isolation: if Sentinel is down, contest finalization must complete normally — the analyze enqueue is fire-and-forget with its own retry; document this explicitly.
+1. CodeArena side: on contest finalization, enqueue `integrity:analyze` (feature-flagged) → a thin adapter calls Nakalchi `POST /analyses` in pull mode; add an internal CodeArena endpoint `GET /internal/contests/:id/submissions` (service-token protected) that Nakalchi's `integrations/codearena.ts` consumes with pagination.
+2. Webhook receiver in CodeArena: verify HMAC, store `{analysisId, flaggedPairs}` on the contest, render an "Integrity" tab in the contest admin UI that deep-links into Nakalchi's report pages.
+3. Failure isolation: if Nakalchi is down, contest finalization must complete normally — the analyze enqueue is fire-and-forget with its own retry; document this explicitly.
 4. E2E: run a real (small) CodeArena contest locally, submit the fixture corpus through the actual judge, finalize, and follow the whole chain to a rendered pair report.
 
-**Acceptance:** the e2e chain works from contest finalize → flagged pair visible in the UI, with CodeArena unaffected when Sentinel is stopped.
+**Acceptance:** the e2e chain works from contest finalize → flagged pair visible in the UI, with CodeArena unaffected when Nakalchi is stopped.
 
 ---
 
 ### Phase 7 — Production Hardening & Launch (Week 7)
 
 **Do:**
-1. Deploy on the Azure VM: `docker-compose.prod.yml` (api, worker, web), external Mongo/Redis, Caddy vhost (e.g. `sentinel.<yourdomain>.duckdns.org`) with the same TLS setup as CodeArena; resource limits on containers (the VM is small — cap worker memory, restart: unless-stopped).
+1. Deploy on the Azure VM: `docker-compose.prod.yml` (api, worker, web), external Mongo/Redis, Caddy vhost (e.g. `Nakalchi.<yourdomain>.duckdns.org`) with the same TLS setup as CodeArena; resource limits on containers (the VM is small — cap worker memory, restart: unless-stopped).
 2. Load/perf pass on the VM itself: run the 1,000-submission benchmark in-situ; if wall time is unacceptable, parallelize the fingerprinting stage with `worker_threads` (tokenization is embarrassingly parallel) — this is the pre-approved optimization; record before/after in `docs/benchmarks.md`.
 3. Ops basics: log rotation, a `GET /metrics`-lite endpoint or admin stats page (analyses/day, p50/p95 analysis wall time), Mongo backup cron for the `Nakalchi` db.
 4. Docs for the repo README: problem, algorithm summary with the pipeline diagram, benchmark table, honest limitations section (single-language matching only, AST evasion possible → Phase 8, no AI-code detection), API reference, 5-minute local setup.
