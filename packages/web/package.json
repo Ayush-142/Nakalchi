@@ -3,15 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc -b tsconfig.json"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@nakalchi/core": "*"
+    "@nakalchi/core": "*",
+    "next": "^15",
+    "react": "^19",
+    "react-dom": "^19",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
-    "typescript": "^5"
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5",
+    "vitest": "^3"
   }
 }

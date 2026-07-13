@@ -1,0 +1,83 @@
+.header {
+  margin-bottom: 1rem;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.title {
+  font-size: 1.3rem;
+  margin: 0;
+}
+
+.vs {
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 1rem;
+}
+
+.flaggedTag {
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.problemRef {
+  color: var(--text-muted);
+  margin: 0.2rem 0 0.75rem;
+}
+
+.statsRow {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.statLabel {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.statValue {
+  font-weight: 700;
+}
+
+.longestRegion {
+  margin-top: 0.85rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.longestRegionNumber {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.longestRegionLabel {
+  color: var(--text-muted);
+}
+
+.cappedNotice {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--warn);
+}

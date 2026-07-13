@@ -76,8 +76,40 @@ services:
       redis:
         condition: service_healthy
 
+  # Phase 5. Same bind-mount pattern as api/worker, but the command also
+  # builds @nakalchi/core before starting Next - core's package.json
+  # resolves "main"/"exports" to ./dist/index.js, dist/ is gitignored, and
+  # there's no prepare/postinstall script anywhere in the repo, so a
+  # fresh clone has no dist/ for anyone to import. api/worker have this
+  # same latent gap (see BUGLOG.md, 2026-07-13 Phase 5) but are frozen -
+  # not touched here. transpilePackages was considered instead but doesn't
+  # actually help: it only changes whether Next transforms an already-
+  # resolved file, not which file gets resolved, and module resolution
+  # still follows core's exports to dist/index.js first regardless.
+  web:
+    image: node:24
+    container_name: nakalchi-web
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - web_node_modules:/app/node_modules
+    # npm ci and the core build must run from /app (the workspace root -
+    # npm workspaces symlinks and --workspace flags only resolve from
+    # there), but `next dev` must run from packages/web itself, or Next
+    # looks for src/app at the repo root and fails with "Couldn't find
+    # any `pages` or `app` directory" (hit this for real - see BUGLOG.md).
+    command: sh -c "npm ci && npm run build --workspace=@nakalchi/core && cd packages/web && npx next dev -p 3000 -H 0.0.0.0"
+    environment:
+      NAKALCHI_API_BASE_URL: http://api:3000
+      NAKALCHI_API_KEY: ${API_KEYS:-dev-local-api-key}
+    ports:
+      - "3001:3000"
+    depends_on:
+      - api
+
 volumes:
   mongo-data:
   redis-data:
   api_node_modules:
   worker_node_modules:
+  web_node_modules:

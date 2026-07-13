@@ -1,0 +1,90 @@
+:root {
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --border: #dcdde1;
+  --text: #1a1b1e;
+  --text-muted: #63666e;
+  --accent: #2f5ad6;
+  --danger: #b3261e;
+  --danger-bg: #fbe9e7;
+  --success: #1e7d3a;
+  --warn: #9a6b00;
+  --mono: ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  --region-0: #ffd54a;
+  --region-1: #7ad0ff;
+  --region-2: #ff9ecf;
+  --region-3: #9be89b;
+  --region-4: #d9b3ff;
+  --region-5: #ffb37a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1b1e;
+    --surface: #232427;
+    --border: #3a3b3f;
+    --text: #ececec;
+    --text-muted: #a0a2a8;
+    --accent: #7c9bff;
+    --danger: #ff6b60;
+    --danger-bg: #3a2422;
+    --success: #4fd07a;
+    --warn: #e0b23a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+code,
+pre {
+  font-family: var(--mono);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}

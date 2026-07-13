@@ -7,7 +7,16 @@ import { SubmissionSnapshot } from '../models/SubmissionSnapshot.js';
 import { Pair } from '../models/Pair.js';
 import { encodeSource } from '../lib/gzip.js';
 import { ApiError } from '../lib/errors.js';
-import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, buildSeekQuery, decodeCursor, encodeCursor } from '../lib/pagination.js';
+import {
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+  buildSeekQuery,
+  decodeCursor,
+  encodeCursor,
+  buildAnalysisSeekQuery,
+  decodeAnalysisCursor,
+  encodeAnalysisCursor,
+} from '../lib/pagination.js';
 import { enqueueAnalysis, type AnalyzeJobData } from '../queue/queues.js';
 
 const MAX_SUBMISSION_SIZE_BYTES = 256 * 1024; // §5 Phase 4 item 3
@@ -122,6 +131,90 @@ export function createAnalysesRouter(queue: Queue<AnalyzeJobData>): Router {
         await enqueueAnalysis(queue, analysis._id.toString());
 
         res.status(202).json({ analysisId: analysis._id.toString() });
+      } catch (err) {
+        next(err);
+      }
+    })();
+  });
+
+  const analysesQuerySchema = z.object({
+    cursor: z.string().optional(),
+    limit: z.coerce.number().int().positive().max(MAX_PAGE_SIZE).optional(),
+    status: z.enum(['queued', 'running', 'completed', 'failed']).optional(),
+  });
+
+  // Phase 5 sanctioned gap-fill: §4.2 never lists an endpoint to list
+  // analyses, but §5's dashboard needs one, and models/Analysis.ts's
+  // { status: 1, createdAt: -1 } index exists for exactly this query
+  // ("dashboard ... list analyses by status, most recent first"). Added
+  // as a scoped exception to the otherwise-frozen service surface; same
+  // auth, same pagination conventions as GET /analyses/:id/pairs below.
+  router.get('/analyses', (req: Request, res: Response, next: NextFunction) => {
+    void (async () => {
+      try {
+        const query = analysesQuerySchema.safeParse(req.query);
+        if (!query.success) {
+          throw new ApiError(422, 'validation_error', 'Invalid query parameters.', query.error.flatten());
+        }
+        const { cursor, limit, status } = query.data;
+
+        const filter: Record<string, unknown> = {};
+        if (status !== undefined) filter.status = status;
+
+        if (cursor !== undefined) {
+          let decoded;
+          try {
+            decoded = decodeAnalysisCursor(cursor);
+          } catch {
+            throw new ApiError(422, 'validation_error', 'Invalid cursor.');
+          }
+          Object.assign(filter, buildAnalysisSeekQuery(decoded));
+        }
+
+        const pageSize = limit ?? DEFAULT_PAGE_SIZE;
+
+        // Summary projection only - never `params` (frozen algorithm
+        // params, not a dashboard concern) and never `webhook` (can carry
+        // a callback URL).
+        const rows = await Analysis.find(filter, {
+          _id: 1,
+          source: 1,
+          status: 1,
+          progress: 1,
+          createdAt: 1,
+          startedAt: 1,
+          completedAt: 1,
+          stats: 1,
+          error: 1,
+        })
+          .sort({ createdAt: -1, _id: 1 })
+          .limit(pageSize + 1)
+          .lean();
+
+        const hasMore = rows.length > pageSize;
+        const page = hasMore ? rows.slice(0, pageSize) : rows;
+        const nextCursor =
+          hasMore && page.length > 0
+            ? encodeAnalysisCursor({
+                createdAt: page[page.length - 1]!.createdAt.toISOString(),
+                id: String(page[page.length - 1]!._id),
+              })
+            : null;
+
+        res.json({
+          analyses: page.map((a) => ({
+            analysisId: String(a._id),
+            source: a.source,
+            status: a.status,
+            progress: a.progress,
+            stats: a.stats,
+            error: a.error,
+            createdAt: a.createdAt,
+            startedAt: a.startedAt,
+            completedAt: a.completedAt,
+          })),
+          nextCursor,
+        });
       } catch (err) {
         next(err);
       }
