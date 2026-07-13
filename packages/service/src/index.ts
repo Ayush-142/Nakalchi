@@ -1,4 +1,2 @@
-import { CORE_PLACEHOLDER } from '@nakalchi/core';
-
-export const SERVICE_PLACEHOLDER = true;
-export { CORE_PLACEHOLDER };
+export { createApp } from './app.js';
+export type { AppDeps } from './app.js';

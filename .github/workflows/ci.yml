@@ -8,6 +8,31 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Redis is a real CI service container (BullMQ's blocking-list/Lua-script
+    # semantics aren't reasonably fakeable) - same pinned version as
+    # docker-compose.yml, so CI matches local dev. Mongo does NOT need a
+    # service container: the service package's integration tests use
+    # mongodb-memory-server, which spins up its own throwaway mongod.
+    services:
+      redis:
+        image: redis:7.2
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # MONGO_URI is a placeholder only, to satisfy config/env.ts's
+      # startup validation - the service package's tests connect directly
+      # to mongodb-memory-server's own dynamically-assigned URI instead of
+      # going through this value.
+      MONGO_URI: "mongodb://localhost:27017/nakalchi-ci-placeholder"
+      REDIS_URL: "redis://localhost:6379"
+      API_KEYS: "ci-test-api-key"
+      WEBHOOK_SECRET: "ci-test-webhook-secret-value"
+      QUEUE_PREFIX: "Nakalchi:"
     steps:
       - uses: actions/checkout@v4
 

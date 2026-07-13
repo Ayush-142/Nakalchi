@@ -25,6 +25,59 @@ services:
       timeout: 5s
       retries: 5
 
+  # Phase 4: no Dockerfile yet (that's docker-compose.prod.yml's job, per
+  # ARCHITECTURE.md §4's file tree) - plain node:24 image, repo
+  # bind-mounted, dependencies installed into a container-local named
+  # volume (NOT shared between api/worker - each gets its own, so their
+  # independent `npm ci` runs can't race each other or the host's own
+  # node_modules) so `docker compose up` alone satisfies this phase's
+  # "one command" acceptance criterion.
+  api:
+    image: node:24
+    container_name: nakalchi-api
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - api_node_modules:/app/node_modules
+    command: sh -c "npm ci && npx tsx packages/service/src/server.ts"
+    environment:
+      MONGO_URI: mongodb://mongo:27017/Nakalchi
+      REDIS_URL: redis://redis:6379
+      API_KEYS: ${API_KEYS:-dev-local-api-key}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-dev-local-webhook-secret-change-me}
+      QUEUE_PREFIX: "Nakalchi:"
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    image: node:24
+    container_name: nakalchi-worker
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - worker_node_modules:/app/node_modules
+    command: sh -c "npm ci && npx tsx packages/service/src/queue/analysisWorker.ts"
+    environment:
+      MONGO_URI: mongodb://mongo:27017/Nakalchi
+      REDIS_URL: redis://redis:6379
+      API_KEYS: ${API_KEYS:-dev-local-api-key}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-dev-local-webhook-secret-change-me}
+      QUEUE_PREFIX: "Nakalchi:"
+      WORKER_CONCURRENCY: "1"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   mongo-data:
   redis-data:
+  api_node_modules:
+  worker_node_modules:

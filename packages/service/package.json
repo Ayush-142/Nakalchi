@@ -7,12 +7,28 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -b tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev:server": "tsx watch src/server.ts",
+    "dev:worker": "tsx watch src/queue/analysisWorker.ts",
+    "seed-demo": "tsx ../../scripts/seed-demo.ts"
   },
   "dependencies": {
-    "@nakalchi/core": "*"
+    "@nakalchi/core": "*",
+    "bullmq": "^5",
+    "dotenv": "^16",
+    "express": "^5",
+    "ioredis": "5.10.1",
+    "mongoose": "^8",
+    "pino": "^9",
+    "pino-http": "^10",
+    "zod": "^3"
   },
   "devDependencies": {
+    "@types/express": "^5",
+    "@types/supertest": "^6",
+    "mongodb-memory-server": "^10",
+    "supertest": "^7",
+    "tsx": "^4",
     "typescript": "^5",
     "vitest": "^3"
   }

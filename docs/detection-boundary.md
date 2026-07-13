@@ -35,6 +35,28 @@ reported region overlaps evasion_2's banner-marked lifted block, computed
 from the marker comments' actual byte offsets — the ratio drops below
 threshold before the region-finding does.
 
+## Why `seed-demo.ts` reports 17 flagged pairs, not 6
+
+`scripts/seed-demo.ts` posts the corpus through the real API and prints
+`stats.flaggedPairs` from the completed analysis — running it reports
+**17**, which looks alarming next to "6 variants flag against sol02"
+until you count the whole clique, not just the sol02-anchored pairs.
+
+`test/pipeline.test.ts` only *asserts* on the 6 `sol02~var_X` pairs (and
+separately, zero flags among sol01-sol10) - it never asserts an exact
+total flagged-pair count. But sol02 + its 6 variants (var_a..var_f) are
+all mutual disguises of the same ancestor, so cross-variant pairs
+(`var_a~var_b`, `var_a~var_c`, ... `var_d~var_f`) legitimately clear
+threshold too, not just the sol02-anchored ones - that's 7 members, up to
+C(7,2)=21 possible pairs within the clique, of which 17 clear threshold
+(the other 4, e.g. `var_c~var_d`, don't - not every pairwise combination
+of disguises survives at these params). `seed-demo.ts` doesn't load
+`evasions/` at all, so none of those enter into it. Confirmed by counting
+`true` rows in the score matrix `test/pipeline.test.ts` prints: exactly
+17 rows involving only `sol02`/`var_*`, zero involving `sol01,sol03-10`.
+Worth having this cold for a demo audience - "why 17?" is exactly the
+kind of number someone watching will ask about.
+
 ## Two product implications
 
 **1. §8's AST-normalization stretch phase is the intended countermeasure
