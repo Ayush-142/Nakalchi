@@ -21,6 +21,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <Link href="/" style={{ color: 'var(--text)', fontWeight: 700, fontSize: '1rem' }}>
             Nakalchi Reports
           </Link>
+          <Link href="/admin" style={{ color: 'var(--text)', marginLeft: '1rem', fontSize: '0.9rem' }}>
+            Admin
+          </Link>
         </header>
         <main style={{ padding: '1.25rem', maxWidth: 1400, margin: '0 auto' }}>{children}</main>
       </body>

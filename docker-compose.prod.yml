@@ -1,0 +1,90 @@
+# Production topology for the single-VM deploy - Nakalchi joins CodeArena's
+# EXISTING Azure VM and Docker network rather than getting its own (see
+# ARCHITECTURE.md §3.1's cost-driven "reuse the VM's Redis... separate Mongo
+# database" tradeoff, and docs/deploy-runbook.md for the full runbook).
+#
+# No mongo/redis services here - both are CodeArena's own already-running
+# containers on the shared `codearena` network (see the `networks:` block
+# below). Nakalchi uses a SEPARATE Mongo database (`Nakalchi`, via a
+# dedicated scoped user - never CodeArena's root) on the same mongod, and a
+# namespaced Redis key prefix (`QUEUE_PREFIX=Nakalchi:`) on the same Redis.
+#
+# Service keys are deliberately `nakalchi-api`/`nakalchi-worker`/`nakalchi-web`,
+# NOT `api`/`worker`/`web` - CodeArena's own docker-compose.prod.yml already
+# has unaliased services literally named `api` and `worker` on this same
+# network. Two containers registered under one DNS name on one network is a
+# real collision (Docker round-robins between them), confirmed by inspecting
+# CodeArena's compose file and re-verified live via `docker network inspect`
+# before this was deployed (see docs/deploy-runbook.md) - not assumed.
+#
+# mem_limit values below are PROVISIONAL. `nakalchi-worker`'s in particular
+# is a placeholder pending docs/benchmarks.md's in-situ VM number (bench runs
+# unconstrained on the VM host, not inside this container - see
+# docs/benchmarks.md's "Memory headroom decision rule" section for why, and
+# for the actual measured value once it exists). Do not treat the number
+# below as final.
+#
+# Log rotation: CodeArena's own docker-compose.prod.yml has none (a real gap,
+# not mirrored here) - every service below gets an explicit bounded
+# `logging:` block instead.
+
+networks:
+  codearena:
+    external: true
+    # Resolved name confirmed live via `docker network inspect` on the VM
+    # (Compose prefixes the network key with the project/directory name) -
+    # see docs/deploy-runbook.md for the exact value found.
+    name: codearena_codearena
+
+services:
+  nakalchi-api:
+    build:
+      context: .
+      dockerfile: packages/service/Dockerfile
+    command: ["node", "packages/service/dist/server.js"]
+    restart: unless-stopped
+    mem_limit: 160m
+    networks: [codearena]
+    env_file:
+      - ./packages/service/.env.production
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  nakalchi-worker:
+    build:
+      context: .
+      dockerfile: packages/service/Dockerfile
+    command: ["node", "packages/service/dist/queue/analysisWorker.js"]
+    restart: unless-stopped
+    # PROVISIONAL - see header comment. Dev-machine bench RSS at n=1000 was
+    # 548.8MB for the whole single-threaded pipeline in one process; this
+    # placeholder is almost certainly too low and gets replaced with
+    # ceil(measured VM RSS x 1.3) once docs/benchmarks.md's in-situ pass runs
+    # (docs/deploy-runbook.md, sequencing step 18).
+    mem_limit: 384m
+    networks: [codearena]
+    env_file:
+      - ./packages/service/.env.production
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  nakalchi-web:
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile
+    restart: unless-stopped
+    mem_limit: 192m
+    networks: [codearena]
+    env_file:
+      - ./packages/web/.env.production
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

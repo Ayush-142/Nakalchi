@@ -87,6 +87,12 @@ export interface PairDetail {
   b: PairDetailSide;
 }
 
+/** GET /admin/stats shape (Phase 7 §5 item 3). */
+export interface AdminStats {
+  analysesPerDay: { date: string; count: number }[];
+  analysisWallMs: { count: number; p50: number | null; p95: number | null };
+}
+
 export interface ListAnalysesParams {
   cursor?: string;
   limit?: number;

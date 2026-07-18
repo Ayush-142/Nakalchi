@@ -1,5 +1,6 @@
 import 'server-only';
 import type {
+  AdminStats,
   AnalysisDetail,
   ListAnalysesParams,
   ListPairsParams,
@@ -87,4 +88,8 @@ export function listPairs(analysisId: string, params: ListPairsParams = {}): Pro
 
 export function getPair(id: string): Promise<PairDetail> {
   return request<PairDetail>(`/api/v1/pairs/${encodeURIComponent(id)}`);
+}
+
+export function getAdminStats(): Promise<AdminStats> {
+  return request<AdminStats>('/api/v1/admin/stats');
 }

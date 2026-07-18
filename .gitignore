@@ -5,6 +5,11 @@ next-env.d.ts
 *.tsbuildinfo
 .env
 .env.*
+# Phase 7: real secret files stay ignored, but committed *.example templates
+# (packages/service/.env.production.example, packages/web/.env.production.example)
+# document what those files need without holding actual secrets - same
+# pattern CodeArena's own repo already uses.
+!.env.*.example
 BUGLOG.md
 coverage/
 .DS_Store

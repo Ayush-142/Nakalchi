@@ -8,6 +8,7 @@ import { apiKeyAuth } from './auth/apiKey.js';
 import { createAnalysesRouter } from './routes/analyses.js';
 import { createPairsRouter } from './routes/pairs.js';
 import { createHealthRouter } from './routes/health.js';
+import { createAdminRouter } from './routes/admin.js';
 import { ApiError, errorHandler } from './lib/errors.js';
 import type { AnalyzeJobData } from './queue/queues.js';
 
@@ -31,6 +32,7 @@ export function createApp(deps: AppDeps): Express {
   apiRouter.use(apiKeyAuth);
   apiRouter.use(createAnalysesRouter(deps.queue));
   apiRouter.use(createPairsRouter());
+  apiRouter.use(createAdminRouter());
   apiRouter.use((req, _res, next) => {
     next(new ApiError(404, 'not_found', `No route for ${req.method} ${req.path}`));
   });

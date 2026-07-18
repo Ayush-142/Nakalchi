@@ -114,6 +114,79 @@ extra_hosts:
    `http://localhost:4001/admin/contests/:id`'s Integrity section, which deep-links to
    `http://localhost:3001/analyses/:analysisId`.
 
+## Intra-cluster pair matrix (Phase 6 review carry-over)
+
+The Phase 6 acceptance review asked which 4 of the 21 possible pairs within
+the `sol02` + 6-variant clique (`var_a`..`var_f`, C(7,2)=21) don't flag,
+expecting the story to be "variant-f (partial copy) falls below threshold
+against the other variants." That expectation is wrong. Re-run for real
+(`npx vitest run packages/core/test/pipeline.test.ts`, full console output
+below) at default params (k=17, w=4, flagThreshold=0.35):
+
+```
+=== two-sum-cpp score matrix (candidate pairs only, incl. evasions) ===
+submissions=18  candidatePairs=35  fullPairCount=153
+pair                       simAtoB   simBtoA  shared  flagged
+sol02~var_a                 1.0000    1.0000      42  true
+sol02~var_b                 1.0000    1.0000      42  true
+var_a~var_b                 1.0000    1.0000      42  true
+var_c~var_e                 1.0000    1.0000      54  true
+sol02~var_f                 0.6190    0.4561      26  true
+var_a~var_f                 0.6190    0.4561      26  true
+var_b~var_f                 0.6190    0.4561      26  true
+sol02~var_d                 0.5476    0.5897      23  true
+var_a~var_d                 0.5476    0.5897      23  true
+var_b~var_d                 0.5476    0.5897      23  true
+var_d~var_f                 0.5897    0.4035      23  true
+sol02~var_c                 0.4762    0.3704      20  true
+sol02~var_e                 0.4762    0.3704      20  true
+var_a~var_c                 0.4762    0.3704      20  true
+var_a~var_e                 0.4762    0.3704      20  true
+var_b~var_c                 0.4762    0.3704      20  true
+var_b~var_e                 0.4762    0.3704      20  true
+...
+var_c~var_d                 0.0926    0.1282       5  false
+var_d~var_e                 0.1282    0.0926       5  false
+var_c~var_f                 0.0926    0.0877       5  false
+var_e~var_f                 0.0926    0.0877       5  false
+```
+(evasion/sol01-10 rows omitted here — see the full run for those; none are
+part of the 21-pair clique.)
+
+**The headline result: every one of the 6 disguise variants still flags
+against the original (`sol02`)** — that's the case that actually matters
+for the product claim ("does a disguised copy of the source get caught"),
+and it holds without exception (`sol02~var_a` through `sol02~var_f`, all
+`true`). **The 4 misses are exclusively variant-vs-variant pairs** —
+`var_c~var_d`, `var_d~var_e`, `var_c~var_f`, `var_e~var_f` — never a
+variant against the source. All 4 sit at exactly `shared=5`, the
+`minSharedFingerprints` floor, similarity 0.08–0.13, well under the 0.35
+threshold.
+
+**This is not the "var_f is the odd one out" story** the Phase 6 review
+expected. `var_f` flags against `sol02`, `var_a`, `var_b`, and `var_d` — it
+only fails to flag against `var_c` and `var_e`, on equal footing with
+`var_c` and `var_e` themselves failing against each other's neighbors.
+Cross-referencing `corpus/two-sum-cpp/README.md`'s exact variant
+descriptions: `var_c` is statement-equivalent rewrites (`for`→`while`,
+`i++`→`i=i+1`, reversed comparisons, hoisted temporaries), `var_d` is
+independent statement/block reordering, `var_e` is `a`+`b`+`c` combined,
+`var_f` is a verbatim partial-copy lift. The 4 misses form a 4-cycle over
+exactly `{var_c, var_d, var_e, var_f}` (`c–d–e–f–c`, each variant in
+exactly 2 of the 4 misses) — i.e. **only doubly-disguised siblings drift
+below threshold against each other**: `var_e` (=`a`+`b`+`c`) still shares
+`c`'s rewrite style, so `var_c~var_e` flags at a perfect 1.0 (54 shared
+fingerprints, the single highest score in the whole matrix); `var_d`'s
+reordering leaves the verbatim-lifted core loop `var_f` copied largely
+intact, so `var_d~var_f` flags too (0.59/0.40, 23 shared). But `var_c`
+compared directly against `var_d` or `var_f` — a rewrite-style disguise
+against a reordering-or-lift-style disguise, with no shared ancestor terms
+surviving *both* transformations at once — doesn't share enough raw
+k-grams to clear `minSharedFingerprints=5` by more than the bare minimum.
+Same for `var_e` (rewrite-flavored) against `var_f` (lift-flavored). A
+real, if unglamorous, property of composing two *different* disguise
+transformations pairwise — not a detection gap, and not `var_f`-specific.
+
 ## Failure isolation
 
 With Nakalchi's containers stopped (`docker compose down` in the Nakalchi repo),

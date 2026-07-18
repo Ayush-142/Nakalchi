@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+**/dist
+**/.next
+# tsc -b's incremental cache is gitignored but persists on a dev machine's
+# working tree - if it leaks into the build context, tsc -b trusts it and
+# silently skips emitting dist/ even though this image's dist/ doesn't
+# exist (see BUGLOG.md's Phase 7 entry). Excluding it guarantees every
+# image build is a full, clean compile regardless of host build state.
+**/*.tsbuildinfo
+.git
+.github
+.claude
+*.log
+.env
+.env.*
