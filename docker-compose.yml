@@ -39,7 +39,11 @@ services:
     volumes:
       - ./:/app
       - api_node_modules:/app/node_modules
-    command: sh -c "npm ci && npx tsx packages/service/src/server.ts"
+    # Phase 6 (BUGLOG.md, 2026-07-13 Phase 5 entry): api/worker had no
+    # @nakalchi/core build step, so a fresh clone couldn't resolve the
+    # package (dist/ is gitignored, no prepare/postinstall script exists).
+    # Mirrors the fix web's command already applied to itself.
+    command: sh -c "npm ci && npm run build --workspace=@nakalchi/core && npx tsx packages/service/src/server.ts"
     environment:
       MONGO_URI: mongodb://mongo:27017/Nakalchi
       REDIS_URL: redis://redis:6379
@@ -47,6 +51,15 @@ services:
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-dev-local-webhook-secret-change-me}
       QUEUE_PREFIX: "Nakalchi:"
       PORT: "3000"
+      # Phase 6: only the worker actually calls out to CodeArena (pull-mode
+      # fetch happens worker-side, see queue/analysisWorker.ts) - loaded here
+      # too since the shared zod env schema requires both vars regardless.
+      CODEARENA_BASE_URL: ${CODEARENA_BASE_URL:-http://host.docker.internal:4000}
+      CODEARENA_SERVICE_TOKEN: ${CODEARENA_SERVICE_TOKEN:-dev-local-service-token}
+    # Docker Desktop (Mac/Windows) resolves host.docker.internal by default.
+    # On plain Linux Docker Engine this needs extra_hosts below (uncomment):
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
     ports:
       - "3000:3000"
     depends_on:
@@ -62,7 +75,8 @@ services:
     volumes:
       - ./:/app
       - worker_node_modules:/app/node_modules
-    command: sh -c "npm ci && npx tsx packages/service/src/queue/analysisWorker.ts"
+    # Phase 6: same core-build fix as api above.
+    command: sh -c "npm ci && npm run build --workspace=@nakalchi/core && npx tsx packages/service/src/queue/analysisWorker.ts"
     environment:
       MONGO_URI: mongodb://mongo:27017/Nakalchi
       REDIS_URL: redis://redis:6379
@@ -70,6 +84,12 @@ services:
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-dev-local-webhook-secret-change-me}
       QUEUE_PREFIX: "Nakalchi:"
       WORKER_CONCURRENCY: "1"
+      # Phase 6: pull-mode fetch (integrations/codearena.ts) runs here, at
+      # the start of the `running` stage - see queue/analysisWorker.ts.
+      CODEARENA_BASE_URL: ${CODEARENA_BASE_URL:-http://host.docker.internal:4000}
+      CODEARENA_SERVICE_TOKEN: ${CODEARENA_SERVICE_TOKEN:-dev-local-service-token}
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
     depends_on:
       mongo:
         condition: service_healthy

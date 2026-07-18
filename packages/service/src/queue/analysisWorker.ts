@@ -1,14 +1,17 @@
 import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { Worker, type Job } from 'bullmq';
-import mongoose from 'mongoose';
+import { Worker, UnrecoverableError, type Job } from 'bullmq';
+import mongoose, { type HydratedDocument } from 'mongoose';
+import type { Logger } from 'pino';
 import type { AnalysisResult, Language, SubmissionInput } from '@nakalchi/core';
 import { analyzeCorpus, fingerprint, tokenizeCpp, tokenizePython } from '@nakalchi/core';
 import { env } from '../config/env.js';
 import { logger } from '../lib/logger.js';
-import { decodeSource } from '../lib/gzip.js';
+import { decodeSource, encodeSource } from '../lib/gzip.js';
 import { connectMongo } from '../lib/mongo.js';
-import { Analysis } from '../models/Analysis.js';
+import { MAX_SUBMISSION_SIZE_BYTES, MAX_CORPUS_SIZE } from '../lib/limits.js';
+import { fetchContestSubmissions } from '../integrations/codearena.js';
+import { Analysis, type AnalysisDoc } from '../models/Analysis.js';
 import { SubmissionSnapshot } from '../models/SubmissionSnapshot.js';
 import { Pair } from '../models/Pair.js';
 import { deliverWebhook } from '../webhooks/notify.js';
@@ -16,6 +19,63 @@ import { ANALYZE_QUEUE_NAME, createRedisConnection, type AnalyzeJobData } from '
 
 /** Nakalchi-introduced constant: progress-reporting granularity during the per-submission metadata pass (§5 item 4). */
 const PROGRESS_UPDATE_EVERY_N_SUBMISSIONS = 25;
+
+/**
+ * Phase 6 pull mode: fetches submissions from CodeArena and stores them as
+ * SubmissionSnapshot docs. Called only when `snapshotsComplete` is false -
+ * which covers both "never fetched yet" and "a prior attempt's insertMany
+ * was interrupted, leaving an untrustworthy partial prefix" (plan review
+ * FIX 2: insertMany is not atomic, so trusting `snapshots.length > 0` alone
+ * would risk silently analyzing a partial corpus after a crash). Always
+ * wipes any existing docs for this analysisId first so a partial prefix is
+ * never mixed with a fresh insert; only flips `snapshotsComplete` to true
+ * once the fresh insertMany has actually succeeded.
+ */
+async function fetchAndStorePullModeSnapshots(analysis: HydratedDocument<AnalysisDoc>, log: Logger): Promise<void> {
+  const { contestId, problemIds } = analysis.contestRef!;
+
+  await SubmissionSnapshot.deleteMany({ analysisId: analysis._id });
+
+  const fetched = await fetchContestSubmissions(contestId, problemIds, (done, total) => {
+    // Fire-and-forget atomic update (plan review FIX 1): analysis.save()
+    // here would race the sequential *awaited* saves in stages 1/2 below -
+    // mongoose forbids concurrent .save() calls on one loaded document
+    // (throws ParallelSaveError). updateOne bypasses the loaded document
+    // entirely, so it can safely run concurrently with anything else.
+    void Analysis.updateOne({ _id: analysis._id }, { $set: { progress: Math.min(9, Math.round((done / total) * 10)) } });
+  });
+
+  const usable = fetched.filter((s) => Buffer.byteLength(s.source, 'utf8') <= MAX_SUBMISSION_SIZE_BYTES);
+  if (usable.length !== fetched.length) {
+    log.warn({ skipped: fetched.length - usable.length }, 'skipped oversized submissions from CodeArena pull');
+  }
+  // Deterministic, not transient - retrying won't fix either of these, so
+  // skip BullMQ's retry/backoff entirely rather than burning 3 attempts on
+  // a condition that can't change between attempts (plan review FIX 3).
+  if (usable.length === 0) {
+    throw new UnrecoverableError('no analyzable submissions after filtering');
+  }
+  if (usable.length > MAX_CORPUS_SIZE) {
+    throw new UnrecoverableError(`corpus too large: ${usable.length} exceeds cap of ${MAX_CORPUS_SIZE}`);
+  }
+
+  const snapshotDocs = usable.map((s) => {
+    const { buffer, encoding } = encodeSource(s.source);
+    return {
+      analysisId: analysis._id,
+      externalId: s.externalId,
+      userRef: s.userRef,
+      problemRef: s.problemRef,
+      language: s.language,
+      source: buffer,
+      sourceEncoding: encoding,
+    };
+  });
+  await SubmissionSnapshot.insertMany(snapshotDocs);
+
+  analysis.snapshotsComplete = true;
+  await analysis.save();
+}
 
 /**
  * Job handler - idempotency guard, per-submission metadata pass, grouped
@@ -52,6 +112,10 @@ export async function processAnalyzeJob(job: Job<AnalyzeJobData>): Promise<void>
   const startedAt = performance.now();
 
   try {
+    if (analysis.source === 'codearena' && !analysis.snapshotsComplete) {
+      await fetchAndStorePullModeSnapshots(analysis, log);
+    }
+
     const snapshots = await SubmissionSnapshot.find({ analysisId: analysis._id });
     if (snapshots.length === 0) {
       throw new Error('no submission snapshots found for this analysis');
@@ -193,7 +257,16 @@ export function startAnalysisWorker(): Worker<AnalyzeJobData> {
     void (async () => {
       if (!job) return;
       const attemptsMax = job.opts.attempts ?? 1;
-      if (job.attemptsMade < attemptsMax) return; // will be retried, not terminal yet
+      // UnrecoverableError (Phase 6 pull-mode deterministic failures - see
+      // fetchAndStorePullModeSnapshots) short-circuits BullMQ's own retry
+      // decision regardless of attempts remaining (shouldRetryJob checks
+      // `!(err instanceof UnrecoverableError)` before ever consulting
+      // attemptsMade < attempts - see node_modules/bullmq's job.js). Without
+      // this check, a job that dies unrecoverably on attempt 1 of 3 would
+      // hit the early return below (1 < 3) and never flip the analysis to
+      // 'failed' - it'd sit in 'running' forever with no webhook fired.
+      const isTerminal = job.attemptsMade >= attemptsMax || err instanceof UnrecoverableError;
+      if (!isTerminal) return; // will be retried, not terminal yet
 
       const analysis = await Analysis.findById(job.data.analysisId);
       if (!analysis || analysis.status === 'completed') return;

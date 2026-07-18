@@ -18,9 +18,7 @@ import {
   encodeAnalysisCursor,
 } from '../lib/pagination.js';
 import { enqueueAnalysis, type AnalyzeJobData } from '../queue/queues.js';
-
-const MAX_SUBMISSION_SIZE_BYTES = 256 * 1024; // §5 Phase 4 item 3
-const MAX_CORPUS_SIZE = 5000; // §5 Phase 4 item 3
+import { MAX_SUBMISSION_SIZE_BYTES, MAX_CORPUS_SIZE } from '../lib/limits.js';
 
 const submissionSchema = z.object({
   externalId: z.string().min(1),
@@ -63,16 +61,37 @@ const callbackUrlSchema = z
   )
   .optional();
 
-// Direct mode only - §5 Phase 4 item 3 ("direct mode first"); pull mode
-// (source:"codearena") is Phase 6 scope (integrations/codearena.ts
-// doesn't exist yet), rejected explicitly below with a clear message
-// rather than a generic schema error.
 const directModeBodySchema = z.object({
   params: paramsOverrideSchema,
   // Implied addition beyond §4.2's literal body shape - see phase plan.
   callbackUrl: callbackUrlSchema,
   submissions: z.array(submissionSchema).min(1).max(MAX_CORPUS_SIZE),
 });
+
+// Phase 6: pull mode validates shape only and enqueues immediately - it does
+// NOT fetch from CodeArena or create SubmissionSnapshot docs here. Per
+// ARCHITECTURE.md §3.2, "fetch submissions" is worker-side work; doing it in
+// this handler would turn a large contest's POST /analyses into a
+// long-blocking call that defeats the 202 semantics. See
+// queue/analysisWorker.ts for where the actual fetch happens.
+const pullModeBodySchema = z.object({
+  params: paramsOverrideSchema,
+  callbackUrl: callbackUrlSchema,
+  source: z.literal('codearena'),
+  contestId: z.string().min(1),
+  problemIds: z.array(z.string().min(1)).min(1),
+});
+
+function resolveParams(paramsOverride: z.infer<typeof paramsOverrideSchema>) {
+  // Resolved and FROZEN on the analysis doc (§4.1: "frozen per analysis") -
+  // immune to any future change to core's defaults.
+  return {
+    k: paramsOverride?.k ?? DEFAULT_K,
+    w: paramsOverride?.w ?? DEFAULT_W,
+    basecodeMaxFreq: paramsOverride?.basecodeMaxFreq ?? DEFAULT_BASECODE_MAX_FREQ,
+    flagThreshold: paramsOverride?.flagThreshold ?? DEFAULT_FLAG_THRESHOLD,
+  };
+}
 
 export function createAnalysesRouter(queue: Queue<AnalyzeJobData>): Router {
   const router = Router();
@@ -81,12 +100,26 @@ export function createAnalysesRouter(queue: Queue<AnalyzeJobData>): Router {
     void (async () => {
       try {
         const body = req.body as Record<string, unknown>;
+
         if (body?.source === 'codearena') {
-          throw new ApiError(
-            422,
-            'unsupported_source',
-            'Pull mode (source: "codearena") is not implemented until Phase 6 - use direct mode ({ submissions: [...] }).',
-          );
+          const parsed = pullModeBodySchema.safeParse(req.body);
+          if (!parsed.success) {
+            throw new ApiError(422, 'validation_error', 'Invalid request body.', parsed.error.flatten());
+          }
+          const { params: paramsOverride, callbackUrl, contestId, problemIds } = parsed.data;
+
+          const analysis = await Analysis.create({
+            source: 'codearena',
+            contestRef: { contestId, problemIds },
+            params: resolveParams(paramsOverride),
+            status: 'queued',
+            webhook: callbackUrl ? { url: callbackUrl, attempts: 0, delivered: false } : undefined,
+          });
+
+          await enqueueAnalysis(queue, analysis._id.toString());
+
+          res.status(202).json({ analysisId: analysis._id.toString() });
+          return;
         }
 
         const parsed = directModeBodySchema.safeParse(req.body);
@@ -95,18 +128,9 @@ export function createAnalysesRouter(queue: Queue<AnalyzeJobData>): Router {
         }
         const { params: paramsOverride, callbackUrl, submissions } = parsed.data;
 
-        // Resolved and FROZEN on the analysis doc (§4.1: "frozen per
-        // analysis") - immune to any future change to core's defaults.
-        const resolvedParams = {
-          k: paramsOverride?.k ?? DEFAULT_K,
-          w: paramsOverride?.w ?? DEFAULT_W,
-          basecodeMaxFreq: paramsOverride?.basecodeMaxFreq ?? DEFAULT_BASECODE_MAX_FREQ,
-          flagThreshold: paramsOverride?.flagThreshold ?? DEFAULT_FLAG_THRESHOLD,
-        };
-
         const analysis = await Analysis.create({
           source: 'api',
-          params: resolvedParams,
+          params: resolveParams(paramsOverride),
           status: 'queued',
           webhook: callbackUrl ? { url: callbackUrl, attempts: 0, delivered: false } : undefined,
         });

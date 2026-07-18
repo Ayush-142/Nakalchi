@@ -61,6 +61,13 @@ const analysisSchema = new Schema({
   progress: { type: Number, required: true, default: 0, min: 0, max: 100 },
   error: { type: String, required: false },
   stats: { type: statsSchema, required: true, default: () => ({}) },
+  // Phase 6 pull-mode idempotency marker (plan review FIX 2): SubmissionSnapshot.insertMany
+  // is not atomic, so a crash mid-insert can persist a partial prefix of docs. The worker's
+  // pull-mode fetch stage (queue/analysisWorker.ts) only trusts existing snapshots as complete
+  // when this is true; otherwise it wipes and re-fetches. Direct mode never sets this (its
+  // snapshots always exist in full before the analysis is even enqueued), so it's irrelevant
+  // to that path.
+  snapshotsComplete: { type: Boolean, required: true, default: false },
   webhook: { type: webhookSchema, required: false },
   createdAt: { type: Date, required: true, default: () => new Date() },
   startedAt: { type: Date, required: false },
