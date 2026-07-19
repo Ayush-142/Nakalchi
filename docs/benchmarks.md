@@ -35,11 +35,104 @@ bucket sizes rather than full pairwise comparison.
 **Acceptance gate (§5 Phase 3): 1,000-submission analysis < 60s
 single-threaded — met at 3.84s**, roughly 15x margin.
 
-(Candidate-pair count isn't strictly monotonic with n here — 500→1,000
-shows a drop from 14,405 to 9,835 — because `Math.random()` drives which
-earlier submission each "plagiarized" entry copies, so cluster sizes vary
-run to run; this is a property of the synthetic generator's randomness,
-not of the engine.)
+## In-situ (Azure VM)
+
+Same `bench/corpus.bench.ts`, same params, run on the actual deployment VM
+(Azure B2s, 2 vCPU, `Ayush@98.70.24.7`) — Node 24.18.0 via nvm, on the host,
+**unconstrained** (not inside any container `mem_limit` — the whole point
+is to measure the pipeline's true footprint before setting one). Run with
+**both CodeArena's 7 containers and Nakalchi's 3 containers already
+resident and idle** — the honest in-situ condition this VM will actually
+run under, not a clean-machine best case.
+
+| n | wall time | RSS (script) | candidate pairs | full pair count | flagged |
+|---|---|---|---|---|---|
+| 100 | 0.27s | 150.0 MB | 576 | 4,950 | 489 |
+| 500 | 0.96s | 330.8 MB | 14,026 | 124,750 | 12,042 |
+| 1,000 | 1.42s | 443.6 MB | 9,785 | 499,500 | 9,199 |
+
+**Acceptance gate: met at 1.42s**, ~42x margin under the 60s threshold —
+comfortably faster than the dev-machine run above (3.84s), most likely
+Azure B2s burst-credit CPU headroom vs. a busier dev machine at the time,
+not a claim about the VM being intrinsically faster hardware.
+
+**`worker_threads` decision (plan's pre-approved gate): NOT triggered.**
+1.42s ≪ 60s — the fan-out design stays unbuilt, per the frozen decision
+rule.
+
+**Peak RSS cross-check** (plan review requirement — don't trust the
+script's own post-run snapshot alone): wrapped the whole 3-run process in
+`/usr/bin/time -v`:
+```
+Maximum resident set size (kbytes): 454468
+```
+= 443.82 MB, vs. the script's own n=1000 self-report of 443.6 MB — the two
+agree to within 0.2 MB. Higher of the two (443.82 MB) is what the
+`nakalchi-worker` `mem_limit` decision below is computed from.
+
+**Memory decision rule, applied:** `mem_limit = ceil(443.82 × 1.3) =
+577m`. Well under the plan's ~700m fallback threshold, so no practical
+corpus-size cap is needed for this deployment — `docker-compose.prod.yml`'s
+`nakalchi-worker.mem_limit` is set to `577m`, and the container was
+recreated and confirmed healthy under it (see `docs/deploy-runbook.md`).
+
+**Why candidate-pair count drops from n=500 to n=1,000 (both tables above,
+same direction on both dev machine and VM — verified, not assumed):**
+initially suspected "`Math.random()` drives cluster sizes, so it varies run
+to run" — checked directly and that's **wrong**: a diagnostic run
+instrumenting the generator's actual plagiarism-cluster sizes found max
+cluster size only 3 members at n=500 and 4 at n=1,000 (5% plagiarism rate
+× small n never produces large clusters), so cluster-size variance can't
+explain a ~5,000-pair swing.
+
+The real, verified cause: `DEFAULT_CORPUS_CAP` (`config.ts`, 100) is a
+**fixed absolute** document-frequency bound — a hash is excluded once it
+appears in more than 100 distinct submissions, *regardless of corpus
+size*. `basecodeMaxFreq` (0.5, i.e. 50%) is a genuine template filter, but
+100 absolute submissions is only 20% of a 500-submission corpus and just
+10% of a 1,000-submission one — so as n grows, the fixed cap becomes a
+*strictly more aggressive* effective threshold. The synthetic generator's
+small 6-shape statement vocabulary means many hashes are accidentally
+common across unrelated submissions (already documented above as a
+performance-benchmark caveat); more of those accidentally-common hashes
+cross the 100-submission absolute cap at n=1,000 than at n=500, getting
+excluded as "template" and removing more real candidate-pair-supporting
+fingerprints than the 2x growth in corpus size adds back.
+
+Confirmed by ablation (isolating `corpusCap` specifically, `basecodeMaxFreq`
+held at its default in both arms): re-running the same generator's output
+through `analyzeCorpus` with `corpusCap: 100` (default) vs. `corpusCap:
+1_000_000` (effectively disabled) —
+
+| n | candidatePairs, corpusCap=100 | candidatePairs, corpusCap≈off | pairs suppressed by corpusCap |
+|---|---|---|---|
+| 500 | 14,954 | 17,211 | 2,257 |
+| 1,000 | 11,008 | 68,648 | 57,640 |
+
+With `corpusCap` disabled the trend is properly monotonic (68,648 >
+17,211) — confirming `corpusCap`'s fixed-absolute design, not generator
+randomness, is what produces the dip in the committed (capped) numbers
+above. (Table numbers here differ slightly from the committed bench
+tables because this diagnostic used fresh `Math.random()` draws, not the
+exact same corpus instance — the *mechanism*, not the exact counts, is the
+verified finding.) Not a bug: `corpusCap` exists precisely to bound
+worst-case pair blow-up independent of N (`config.ts`'s own comment: "an
+absolute (not fractional) bound... basecodeMaxFreq alone doesn't bound
+this for large corpora"), and it's doing exactly that job here — the
+non-monotonic *count* is a byproduct of a fixed bound meeting a growing,
+vocabulary-limited synthetic corpus, not evidence of an engine defect, and
+it doesn't touch the real accuracy claim (`test/pipeline.test.ts`'s 18-doc
+real corpus never approaches 100 submissions, so `corpusCap` is inert
+there).
+
+**Known tradeoff, not changed here:** because `corpusCap` is fixed and
+absolute rather than fractional, its effective filter strictness increases
+as corpus size grows (100 submissions is 20% of a 500-corpus but only 10%
+of a 5,000-submission contest's worth) — a size-relative (fractional) cap
+is a reasonable future improvement, but `corpusCap` stays at its current
+value here: algorithm parameters are frozen per ARCHITECTURE.md §0 rule 5,
+and this section documents the tradeoff for the record, not a bug to fix
+in this phase.
 
 ## Inverted index key representation (`bench/index-key.bench.ts`)
 

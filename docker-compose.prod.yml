@@ -59,12 +59,14 @@ services:
       dockerfile: packages/service/Dockerfile
     command: ["node", "packages/service/dist/queue/analysisWorker.js"]
     restart: unless-stopped
-    # PROVISIONAL - see header comment. Dev-machine bench RSS at n=1000 was
-    # 548.8MB for the whole single-threaded pipeline in one process; this
-    # placeholder is almost certainly too low and gets replaced with
-    # ceil(measured VM RSS x 1.3) once docs/benchmarks.md's in-situ pass runs
-    # (docs/deploy-runbook.md, sequencing step 18).
-    mem_limit: 384m
+    # FINAL - derived from the real in-situ VM bench (docs/benchmarks.md's
+    # "In-situ (Azure VM)" section, both CodeArena's and Nakalchi's stacks
+    # resident and idle): peak RSS at n=1000 was 443.82MB (cross-checked via
+    # /usr/bin/time -v against the bench script's own 443.6MB self-report -
+    # they agree). mem_limit = ceil(443.82 x 1.3) = 577m, per the decision
+    # rule fixed in plan review. Well under the ~700m fallback threshold, so
+    # no corpus-size cap was needed for this VM.
+    mem_limit: 577m
     networks: [codearena]
     env_file:
       - ./packages/service/.env.production

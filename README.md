@@ -95,11 +95,29 @@ under the project's own 60s acceptance gate. Full breakdown, including the
 inverted-index representation and hash-representation micro-benchmarks:
 [docs/benchmarks.md](docs/benchmarks.md).
 
-**In-situ Azure VM numbers:** pending — Phase 7's deploy runbook
-([docs/deploy-runbook.md](docs/deploy-runbook.md)) runs this same bench
-script on the deployed 2-vCPU VM; real numbers land in
-`docs/benchmarks.md`'s "In-situ (Azure VM)" section once that step actually
-executes, not before.
+*Candidate pairs dip from n=500 to n=1,000 (both tables) — verified cause:
+`corpusCap`'s fixed absolute document-frequency bound (100 submissions)
+becomes a proportionally stricter filter as the corpus grows, excluding
+more of the synthetic generator's accidentally-common hashes at larger n;
+confirmed by ablation, not generator randomness — full mechanism and
+ablation data in [docs/benchmarks.md](docs/benchmarks.md).*
+
+**In-situ Azure VM numbers** (same script, same params, run unconstrained
+on the VM host with both CodeArena's and Nakalchi's containers already
+resident and idle — the honest in-situ condition):
+
+| n | wall time | RSS | candidate pairs | full pair count | flagged |
+|---|---|---|---|---|---|
+| 100 | 0.27s | 150.0 MB | 576 | 4,950 | 489 |
+| 500 | 0.96s | 330.8 MB | 14,026 | 124,750 | 12,042 |
+| 1,000 | 1.42s | 443.6 MB | 9,785 | 499,500 | 9,199 |
+
+1.42s at n=1,000 — ~42x margin under the 60s gate, so the pre-approved
+`worker_threads` fingerprinting fan-out was **not** built (trigger
+threshold: >60s). Peak RSS cross-checked against `/usr/bin/time -v`
+(443.82MB, agrees with the script's own 443.6MB self-report) and used to
+size `nakalchi-worker`'s production `mem_limit` at 577MB
+(`docker-compose.prod.yml`). Full detail: [docs/benchmarks.md](docs/benchmarks.md).
 
 **Detection accuracy** (a distinct claim from performance): real corpus
 test (`packages/core/test/pipeline.test.ts`, `corpus/two-sum-cpp`) — all 6
