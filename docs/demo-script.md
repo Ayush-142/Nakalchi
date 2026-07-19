@@ -78,3 +78,30 @@ the threshold actually doing work, not an obviously-safe gap."
 Confirmed live during Phase 7 (not assumed): `packages/core/src/config.ts`'s
 `DEFAULT_FLAG_THRESHOLD = 0.35` matches ARCHITECTURE.md §2 exactly, so the
 0.35 cited above is the real, current, unmodified threshold.
+
+## Alternative: record shots 3–4 against the live deployment
+
+Real analysis run against the public API on `nakalchi-ayush.duckdns.org`
+(closes the acceptance-gate verification item — a real
+`POST /analyses` → `GET /analyses/:id/pairs` → `GET /pairs/:id` round trip
+over the public domain, not just localhost), and **kept resident** as the
+deployed dashboard's demo-ready content — same 17-flagged-pair result as
+Shot 2 above, real live IDs:
+
+```
+$ API_BASE_URL=https://nakalchi-ayush.duckdns.org SEED_API_KEY=<key> npx tsx scripts/seed-demo.ts
+Analysis created: 6a5cc7f59b125fbc8b1fa279
+Analysis completed: { submissions: 16, fingerprints: 953, candidatePairs: 23, flaggedPairs: 17, wallMs: 90 }
+```
+
+Live URLs for shots 3–4, no localhost needed:
+- Dashboard: `https://nakalchi-ayush.duckdns.org/`
+- Analysis (Shot 2 landing): `https://nakalchi-ayush.duckdns.org/analyses/6a5cc7f59b125fbc8b1fa279`
+- `sol02 ~ var_e` pair (Shot 3): `https://nakalchi-ayush.duckdns.org/pairs/6a5cc7f5da9800e3abd5d352`
+  — same real numbers as the local run: `simAtoB=0.476, simBtoA=0.370, sharedFingerprints=20, longestRegionTokens=49`.
+- `sol01 ~ sol10` pair (Shot 4): `https://nakalchi-ayush.duckdns.org/pairs/6a5cc7f5da9800e3abd5d34d`
+  — same real numbers: `simAtoB=0.30, simBtoA=0.174, sharedFingerprints=12, flagged=false`.
+
+Both confirmed rendering live (`200`, real content) at time of writing —
+verify again before recording, since this analysis could in principle be
+superseded by a later one on the same dashboard.

@@ -17,7 +17,7 @@ step below, not from a `git pull`:
 - `~/Nakalchi/packages/service/.env.production`, `~/Nakalchi/packages/web/.env.production` (step 6/7)
 - `~/CodeArena/api/.env.production`, `~/CodeArena/worker/.env.production`, `~/CodeArena/.env.production` (their own pre-existing secrets, plus the Nakalchi-integration additions in step 7)
 - the Nakalchi scoped Mongo user's password (step 5)
-- the DuckDNS updater script and its token (step 10, once installed)
+- the DuckDNS updater script and its token (step 10a)
 
 ---
 
@@ -328,6 +328,35 @@ and no `az` CLI is installed to query the actual Public IP resource.
 resource → Configuration → Assignment: Static vs Dynamic) or a DuckDNS
 cron updater added regardless as a belt-and-braces fix.
 
+## 10a. DuckDNS auto-updater — DONE
+
+Installed regardless of the Static/Dynamic question above (closes the
+reachability risk either way, per plan review). Standard `duck.sh`
+pattern, both domains in one update URL:
+```bash
+mkdir -p ~/duckdns
+cat > ~/duckdns/duck.sh <<'EOF'
+echo url="https://www.duckdns.org/update?domains=codearena-ayush,nakalchi-ayush&token=<token>&ip=" | curl -k -o ~/duckdns/duck.log -K -
+EOF
+chmod 700 ~/duckdns/duck.sh   # embeds the token - owner-only
+```
+Token itself is **not** in this file or in git — lives only in
+`~/duckdns/duck.sh` on the VM (see this doc's header, "deliberately
+unversioned files"). Cron, absolute path (not `~`, which cron doesn't
+reliably expand):
+```bash
+( crontab -l 2>/dev/null; echo "*/5 * * * * /home/Ayush/duckdns/duck.sh >/dev/null 2>&1" ) | crontab -
+```
+Verified with a real manual run before relying on the cron:
+```
+$ ~/duckdns/duck.sh && cat ~/duckdns/duck.log
+OK
+$ crontab -l
+*/5 * * * * /home/Ayush/duckdns/duck.sh >/dev/null 2>&1
+$ ls -la ~/duckdns/duck.sh
+-rwx------ 1 Ayush Ayush 165 ...  duck.sh
+```
+
 ## 11. In-situ bench — DONE
 
 ```
@@ -362,20 +391,18 @@ $ docker exec nakalchi-nakalchi-worker-1 sh -c 'wget -qO- --timeout=5 http://api
 {"mongo":true,"redis":true,"worker":true}
 ```
 
-## 12. Backup cron — PENDING
+## 12. Backup cron — DONE
 
-```bash
-crontab -e
-```
 ```cron
 0 3 * * * docker exec codearena-mongo-1 mongodump -u nakalchi_svc -p '<pass>' --authenticationDatabase Nakalchi --db=Nakalchi --archive --gzip > /home/Ayush/backups/nakalchi-$(date +\%Y\%m\%d).gz 2>>/home/Ayush/backups/backup.log
 0 4 * * * find /home/Ayush/backups/ -name 'nakalchi-*.gz' -mtime +14 -delete
 ```
+Installed via `crontab` (not `crontab -e`, non-interactive over SSH).
 Streamed directly to the host via stdout redirect — nothing written inside
 the `mongo` container.
 
-**Restore** (verify once for real as part of this deploy, not left
-untested):
+**Restore, verified for real against the actual binary, not left
+untested:**
 ```bash
 cat /home/Ayush/backups/nakalchi-YYYYMMDD.gz | \
   docker exec -i codearena-mongo-1 mongorestore -u nakalchi_svc -p '<pass>' \
@@ -386,16 +413,112 @@ Raw `.gz` piped straight in; `--gzip` does the single decompression itself
 (piping through `gunzip` first would double-decompress and fail).
 `--nsInclude` used instead of the deprecated-with-`--archive` `--db` flag.
 
-## 13. Prod smoke — PENDING
+Ran a real dump + restore cycle immediately (not waiting for the 3am cron):
+```
+$ docker exec codearena-mongo-1 mongodump ... > nakalchi-20260719-1109.gz
+writing `Nakalchi.submission_snapshots`/`analyses`/`pairs` to archive on stdout
+done dumping (0 documents each)
+$ cat nakalchi-20260719-1109.gz | docker exec -i codearena-mongo-1 mongorestore ...
+dropping collection `Nakalchi.submission_snapshots` before restoring
+finished restoring `Nakalchi.submission_snapshots` (0 documents, 0 failures)
+[... same for analyses, pairs ...]
+restoring indexes for collection `Nakalchi.pairs`/`analyses`/`submission_snapshots` from metadata
+0 document(s) restored successfully. 0 document(s) failed to restore.
+exit=0
+```
+**Honest caveat:** the `Nakalchi` database is currently empty (no
+production analyses have run yet — only local dev ones) — 550-byte archive,
+0 documents. This fully verifies the mechanism (auth, gzip round-trip,
+`--nsInclude` namespace targeting, `--drop`, index metadata restore all
+completed cleanly, exit 0) but not data-volume preservation with real
+documents. The prod smoke (step 13) populates the first real
+production analysis; re-running this same cycle afterward would be a
+stronger, data-bearing test if ever needed, but the mechanism itself is
+already proven correct here.
 
-One tiny CodeArena contest, submitted through the real judge on the live
-deployment, finalized, confirmed end to end:
-- `integrityAnalysis.status === 'completed'` on the contest doc.
-- "View full report in Nakalchi" link on the live admin page resolves to a
-  rendered Nakalchi pair report.
-- Against the deployed URLs, not localhost.
+## 13. Prod smoke — DONE
 
-## 14. Fill in real numbers — PENDING
+**Real deployment bug found and fixed mid-smoke (see BUGLOG.md, "real
+deployment bug caught during smoke"):** `api`/`worker` had only ever been
+*restarted* (step 9), never *rebuilt*, so they were running a 2026-07-11
+image predating the entire Nakalchi integration. First test contest
+(`test-integrity-smoke-20260719`, `6a5cba2589787c351635c283`) finalized on
+the stale image — real AC verdicts, real standings, but the integrity
+enqueue never ran (the code didn't exist yet in that image) and, being a
+one-time atomic event, could never be retried for that contest. Fixed:
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production build api worker
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d api worker
+```
+Verified the fix landed before continuing: `integrity.js` present in the
+worker image, `adminContestsRouter.get` present in the api image,
+`"Integrity worker ready"` on worker boot.
+
+**Second contest** (`test-integrity-smoke-20260719-v2`,
+`6a5cbdf442347b6de5888214`) — full real chain, admin login
+(`admin`/`DemoPass123`, pre-rotation), contest created via
+`POST /api/admin/contests`, 2 bot accounts (`bot0001`/`bot0002`) registered
+before `startAt`, both submitted the real known-AC `two-sum` reference
+solution (`scripts/solutions/two-sum.ac.cpp`) inside the window, both
+verdicts real `AC` (`execTimeMs` 554/491 — actual judge execution, not
+mocked), `endAt` passed, `GET .../leaderboard` finalized on the first call
+(`isFinalized: true`), `GET /api/admin/contests/:id` (now working) showed:
+```json
+"integrityAnalysis":{"analysisId":"6a5cbf7f9b125fbc8b1fa273","status":"completed","flaggedPairs":0,"topSimilarity":0,...}
+```
+Cross-checked directly against Nakalchi's own API (bypassing CodeArena
+entirely): `GET /api/v1/analyses/6a5cbf7f9b125fbc8b1fa273` →
+`{"status":"completed","stats":{"submissions":2,"fingerprints":92,"candidatePairs":0,"flaggedPairs":0,"wallMs":383}}`.
+`flaggedPairs: 0` is expected, not a bug: 2 byte-identical submissions →
+every shared hash hits `docFreq/N = 2/2 = 1.0`, correctly excluded as
+"template" by `basecodeMaxFreq` (same documented edge case as the Phase 4
+`idempotency.test.ts` finding).
+
+**Deep-link:** CodeArena's admin contest page (`/admin/contests/:id`) is a
+client-rendered SPA — `curl` only sees a loading skeleton, no JS executes,
+so the literal rendered `<a href>` couldn't be captured this way. Verified
+the underlying pieces instead, each for real: (1) `NEXT_PUBLIC_NAKALCHI_WEB_URL`
+confirmed baked into the built client bundle (step 9); (2) the exact
+construction logic (`${NAKALCHI_WEB_URL}/analyses/${analysisId}`) read
+directly from `frontend/app/admin/contests/[id]/page.tsx`; (3) that exact
+resulting URL,
+`https://nakalchi-ayush.duckdns.org/analyses/6a5cbf7f9b125fbc8b1fa273`,
+fetched directly — real `200`, `<title>Nakalchi — Reports</title>`, page
+content shows `Completed`. All three pieces verified independently; the
+literal DOM render wasn't captured (would need a headless browser), but
+the link's target, construction, and content are all confirmed real.
+
+**Full cleanup, count-verified after (both contests, since the stale-image
+issue produced two):**
+```
+before: 2 bot users, 4 submissions (2 contests × 2 bots), 2 test contests
+deleted: 2 submissions removed, 2 users removed, 2 contests removed
+after:  0 bot users, 0 submissions, 0 test contests, 0 hints
+        is-prime=false, two-sum=false, longest-increasing-subsequence=false
+```
+Nakalchi's own analysis doc + pairs (`6a5cbf7f9b125fbc8b1fa273`) were
+**not** touched — kept as the acceptance evidence.
+
+**Admin password rotated** (last item, see BUGLOG.md's security-finding
+entry): new password generated and verified (old rejected `401`, new
+returns `200`/`isAdmin:true`) — not recorded in this file or git.
+
+## 14. Fill in real numbers — DONE
+
+Completed as part of step 11 (bench numbers landed in `docs/benchmarks.md`,
+`README.md`, `docs/resume-bullets.md` immediately after the in-situ run —
+see those files' git history for the exact commit). Nothing in this phase
+was left as a placeholder once its real number existed.
+
+---
+
+**Phase 7 acceptance gate: complete.** Publicly reachable deployment (both
+domains, real TLS); benchmark table with real VM numbers; demo script
+ready; README complete with a verified local setup; full prod smoke
+(contest → real judge → finalize → integrity analysis → deep-link) against
+public URLs with a real deployment bug caught and fixed along the way;
+backup/restore mechanism verified; DNS auto-renewal installed; admin
+credential rotated; all smoke-test residue cleaned up and count-verified.
 
 `docs/benchmarks.md`'s VM section, README.md's benchmark table, and
 `docs/resume-bullets.md`'s `X`/`Y`/`N` placeholders all get filled from
